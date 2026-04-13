@@ -14,6 +14,19 @@ def dot_product(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     result = torch.tensor(0.0)
     # TODO: implement using a for loop
 
+    # COMMENT ON SOLUTION:
+    # using range(a.shape) for looping leads to --> **'torch.Size' object cannot be interpreted as an integer**
+    # torch.Size is a subclass of "tuple" --> indexing the tupel for the size of 1D Tensor 
+    
+    # Equivalent solutions: 
+    #for el in range(a.numel()):
+    #for el in range(a.size().numel()):
+    #for el in range(a.size(0)): #the size of 1st dimension = size of vector for 1D Tensor
+
+    for el in range(a.numel()):
+        result += a[el] * b[el]
+
+
     return result
 
 
@@ -30,7 +43,14 @@ def matmul_loops(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     assert k == k2, "Incompatible matrix dimensions"
     
     C = torch.zeros(m, n)
+
     # TODO: implement using three nested for loops
+
+    for row in range(m):
+        for col in range(n):
+            
+            for el in range(k):
+                C[row,col] += A[row, el] * B[el, col]
 
     return C
 
@@ -44,7 +64,13 @@ def matmul_dot(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     assert k == k2, "Incompatible matrix dimensions"
     
     C = torch.zeros(m, n)
+     
     # TODO: implement using two for loops and calls to dot_product
+
+    for row in range(m):
+        for col in range(n):
+            C[row,col] += dot_product(A[row,:], B[:,col])
+            
 
     return C
 
@@ -64,7 +90,18 @@ def einsum_loops(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     size_b, size_y = B.shape[0], B.shape[3]
 
     C = torch.zeros(size_a, size_b, size_c, size_x, size_y)
-    # TODO: implement using for loops over all seven index dimensions
+    # TODO: implement using for loops over all 7 index dimensions
+
+    for a in range(size_a):
+        for b in range(size_b):
+            for c in range(size_c):
+                for x in range(size_x):
+                    for y in range(size_y):
+                        val = 0
+                        for s in range(size_s):
+                            for p in range(size_p):
+                                val += A[a,c,s,x,p]*B[b,s,p,y]
+                        C[a,b,c,x,y] = val        
 
     return C
 
