@@ -117,7 +117,14 @@ def einsum_gemm(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     size_b, size_y = B.shape[0], B.shape[3]
 
     C = torch.zeros(size_a, size_b, size_c, size_x, size_y)
-    # TODO: implement with for loops over a, b, c, s and a matmul for the inner GEMM
+    # TODO: implement with for loops over a, b, c, s and a matmul for the inner GEMM matmul_dot 2D
+
+    for a in range(size_a):
+        for b in range(size_b):
+            for c in range(size_c):
+                for s in range(size_s):
+                    # A shape = (x, p), B shape = (p,y) ==> x,p * p,y = x,y
+                    C[a,b,c,:,:] += matmul_dot (A[a,c,s,:,:], B[b,s,:,:])
 
     return C
 
