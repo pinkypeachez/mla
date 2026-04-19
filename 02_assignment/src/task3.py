@@ -1,6 +1,7 @@
 import cuda.tile as ct
 import cupy as cp
 import torch
+import triton.testing
 
 '''
 a) TODO: write a cuTile kernel that adds 2 4D tensors A and B element-wise 
@@ -75,7 +76,7 @@ def run_kernels():
                                     sum_kl,
                                     (a_tensor, b_tensor, c_tensor, k,l))
 
-    print("1: is correct: ", torch.allclose(c_tensor, a_tensor + b_tensor))
+    print("1) torch.allclose verification: ", torch.allclose(c_tensor, a_tensor + b_tensor))
 
     c_tensor.zero_()
 
@@ -86,7 +87,32 @@ def run_kernels():
                                     (a_tensor, b_tensor, c_tensor, m, n))
 
 
-    print("2: is correct: ", torch.allclose(c_tensor, a_tensor + b_tensor))
+    print("2) torch.allclose verification: ", torch.allclose(c_tensor, a_tensor + b_tensor))
+
+
+    # b) Benchmarks                                                  
+    def bench_kl():
+        ct.launch(torch.cuda.current_stream().cuda_stream,
+                  (m, n, 1),
+                  sum_kl,
+                  (a_tensor, b_tensor, c_tensor, k, l))
+
+    def bench_mn():
+        ct.launch(torch.cuda.current_stream().cuda_stream,
+                  (k, l, 1),
+                  sum_mn,
+                  (a_tensor, b_tensor, c_tensor, m, n))
+
+    ms_kl = triton.testing.do_bench(bench_kl)
+    ms_mn = triton.testing.do_bench(bench_mn)
+
+    print(f"\nBenchmark results (average runtime):")
+    print(f"  sum_kl  (tile over K,L  | parallelize over M,N): {ms_kl:.4f} ms")
+    print(f"  sum_mn  (tile over M,N  | parallelize over K,L): {ms_mn:.4f} ms")
+    print(f"\nAnalysis:")
+    faster = "sum_kl" if ms_kl < ms_mn else "sum_mn"
+    ratio  = max(ms_kl, ms_mn) / min(ms_kl, ms_mn)
+    print(f"  {faster} is faster by a factor of ~{ratio:.2f}x.")
 
 
 

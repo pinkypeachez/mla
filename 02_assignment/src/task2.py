@@ -52,17 +52,12 @@ def next_power_of_2(n):
     return 1 << (n - 1).bit_length()
 
 
-# ------------------------- MAIN
-
 # set arbitrary shape (M,K)
 m = random.randint(0,20)
 k = random.randint(0,20)
 
 # round up to the next power of 2
 tile_size = next_power_of_2(k)
-
-#reduced_dim = ct.Constant[k] #for cuda.tile.reduce function 
-# "axis (int) – an integer constant that specifies the axis to reduce along"
 
 # torch.rand: Returns a tensor filled with random numbers from a uniform distribution on the interval [0,1)
 i_matrix = torch.rand ((m,k), 
@@ -82,5 +77,6 @@ ct.launch(torch.cuda.current_stream().cuda_stream,
                                 reduce,
                                 (i_matrix, o_vector, k, tile_size))
 
-print(o_vector)
+# verify correctness by comparing the result to torch.sum(mat, dim=1) via torch.allclose
+print("torch.allclose() verification: ", torch.allclose(o_vector, torch.sum(i_matrix,dim=1)))
     
