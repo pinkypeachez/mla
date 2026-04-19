@@ -77,7 +77,6 @@ print("Created matrix: ", i_matrix, "\n with dimensions ",m,"*",k)
 grid = (m,1,1) # must be a tuple!!! = number of Blocks, each block gets 1 row
 
 
-
 ct.launch(torch.cuda.current_stream().cuda_stream,
                                 grid,
                                 reduce,

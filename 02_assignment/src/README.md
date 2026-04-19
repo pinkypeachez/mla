@@ -93,3 +93,38 @@ z.B Addition 0 weil x + 0 = x
     "/home/mla05/assignment2/task2.py", line 36, col 14-72, in reduce:
         result = ct.reduce(i_tile, tile_size, lambda a,b: a+b, identity=0.0)
                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+### Task 3
+
+## 1st run
+
+cuda.tile._exception.TileTypeError: Invalid argument "shape" of load(): Expected a constant integer tuple, but given value is not constant
+  "/home/mla05/assignment2/task3.py", line 31, col 14-75, in sum_kl:
+        a_tile = ct.load(a_tensor, index = (pid_m, pid_n, 0, 0), shape = (k,l))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Reason:
+ct.load() (and ct.store()) require the shape parameter to be a compile-time constant — cuTile resolves tile shapes at compile time for register allocation and code generation. Runtime values like k and l (even if they don't change) are not considered constants by the compiler.
+
+Fix:
+def sum_kl(a_tensor, b_tensor, c_tensor,
+           n: ct.Constant[int],
+           k: ct.Constant[int],   # <-- mark as Constant
+
+## 2nd run
+
+cuda.tile._exception.TileTypeError: Invalid argument "shape" of load(): Expected shape length to be 4, got 2
+  "/home/mla05/assignment2/task3.py", line 35, col 14-75, in sum_kl:
+        a_tile = ct.load(a_tensor, index = (pid_m, pid_n, 0, 0), shape = (k,l))
+
+The shape in ct.load() must match the full number of dimensions of the tensor. Since your tensor is 4D (M, N, K, L), shape must also have 4 elements — it describes the tile size along each dimension.
+
+
+## 3rd run
+
+cuda.tile._exception.TileTypeError: store(): multiple values for argument 'index'
+  "/home/mla05/assignment2/task3.py", line 42, col 5-80, in sum_kl:
+        ct.store(c_tensor, c_tile,  index = (pid_m, pid_n, 0, 0), shape = (1,1,k,l))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ct.store() has a different signature than ct.load() — the tensor being stored to is likely the third positional argument
