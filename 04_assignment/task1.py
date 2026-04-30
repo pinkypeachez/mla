@@ -139,8 +139,46 @@ def d_contraction(A, B, C,
 # eabklxy, ecklyz -> eabcxz
 # GEMM dims: exyz, meaning that you perform a 3D ct.mma inside the kernel. 
 # Sequentialize all other K-dimensions, parallelize the remaining dimensions.
-def e_contraction():
-    print("bla")
+@ct.kernel 
+def e_contraction(A, B, C, 
+                  e: ct.Constant[int],
+                  a: ct.Constant[int],
+                  b: ct.Constant[int],
+                  c: ct.Constant[int],
+                  k: ct.Constant[int],
+                  l: ct.Constant[int],
+                  x: ct.Constant[int],
+                  y: ct.Constant[int],
+                  z: ct.Constant[int]):
+        pid = ct.bid(0)
+
+        # Parallelize over: a,b,c
+        #decompose pid -> (a,b,c)
+        pid_c = pid % c
+        pid = pid // c
+
+        pid_b = pid % b
+        pid = pid // b
+
+        pid_a = pid % a
+       # pid = pid // a
+
+        #pid_e = pid
+
+        acc = ct.zeros((e, x, z), dtype=ct.float32)
+
+        # Serialize: contraction dims: k,l,y ABER OHNE l also --- k
+        
+        for k_i in range(k):
+         for l_i in range(l):
+            a_tile = ct.load (A, index=(0, pid_a, pid_b, k_i, l_i, 0, 0), shape =(e,1,1,1,1,x,y))
+            b_tile = ct.load (B, index=(0, pid_c, k_i, l_i, 0, 0), shape =(e,1,1,1,y,z))
+            a_tile = ct.reshape(a_tile, (x, y))
+            b_tile = ct.reshape(b_tile, (y, z))
+            acc = ct.mma(a_tile, b_tile, acc)
+        out = ct.reshape(acc, (e,1,1,1,x,z)).astype(ct.float16)
+        ct.store(C, index=(0, pid_a, pid_b, pid_c, 0,0), tile=out)
+
 
 def run_kernels():
     e, a, b, c = 16, 8, 32, 64
@@ -158,7 +196,6 @@ def run_kernels():
                     dtype=torch.float16,
                      device='cuda' )
     
-    # decompose weil grid kann nur 3D sein!!!
     grid = (e*a*b*c, )
     
     # Assert that all tensors will fit in memory (less than 32 GiB) first
@@ -186,7 +223,6 @@ def run_kernels():
                     (a_input, b_input, c_output,   
                     e,a,b,c,k,l,x,y,z))            
     
-    #ref = torch.einsum('eabklxy,ecklyz->eabcxz', a_input.float(), b_input.float()).half()
     print("c) Verification:", torch.allclose(c_output, ref, atol=1e-2, rtol=1e-2))
 
 
@@ -201,9 +237,20 @@ def run_kernels():
                     (a_input, b_input, c_output,   
                     e,a,b,c,k,l,x,y,z))            
     
-    #ref = torch.einsum('eabklxy,ecklyz->eabcxz', a_input.float(), b_input.float()).half()
     print("d) Verification:", torch.allclose(c_output, ref, atol=1e-2, rtol=1e-2))
 
+# Task 1 e)
+    c_output = c_output.zero_() 
+
+    grid_e = (a*c*b, )
+
+    ct.launch(torch.cuda.current_stream(),
+                    grid_e,
+                    e_contraction,
+                    (a_input, b_input, c_output,   
+                    e,a,b,c,k,l,x,y,z))            
+    
+    print("e) Verification:", torch.allclose(c_output, ref, atol=1e-2, rtol=1e-2))
 
 
 if __name__ == "__main__":
