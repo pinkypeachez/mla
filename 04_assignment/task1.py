@@ -136,6 +136,7 @@ def d_contraction(A, B, C,
     out = ct.reshape(acc, (1,1,1,1,x,z)).astype(ct.float16)
     ct.store(C, index=(pid_e, pid_a, pid_b, pid_c, 0,0), tile=out)
 
+# --------------- Task 1 e)
 # eabklxy, ecklyz -> eabcxz
 # GEMM dims: exyz, meaning that you perform a 3D ct.mma inside the kernel. 
 # Sequentialize all other K-dimensions, parallelize the remaining dimensions.
@@ -173,8 +174,8 @@ def e_contraction(A, B, C,
          for l_i in range(l):
             a_tile = ct.load (A, index=(0, pid_a, pid_b, k_i, l_i, 0, 0), shape =(e,1,1,1,1,x,y))
             b_tile = ct.load (B, index=(0, pid_c, k_i, l_i, 0, 0), shape =(e,1,1,1,y,z))
-            a_tile = ct.reshape(a_tile, (x, y))
-            b_tile = ct.reshape(b_tile, (y, z))
+            a_tile = ct.reshape(a_tile, (e,x, y))
+            b_tile = ct.reshape(b_tile, (e,y, z))
             acc = ct.mma(a_tile, b_tile, acc)
         out = ct.reshape(acc, (e,1,1,1,x,z)).astype(ct.float16)
         ct.store(C, index=(0, pid_a, pid_b, pid_c, 0,0), tile=out)
@@ -211,6 +212,8 @@ def run_kernels():
     
     ref = torch.einsum('eabklxy,ecklyz->eabcxz', a_input.float(), b_input.float()).half()
     print("b) Verification:", torch.allclose(c_output, ref, atol=1e-2, rtol=1e-2))
+    ms_b = triton.testing.do_bench(lambda: ct.launch(torch.cuda.current_stream(), grid, b_contraction, (a_input, b_input, c_output, e,a,b,c,k,l,x,y,z)))
+    print(f"Runtime: {ms_b:.3f} ms")
 
 # Task 1 c)
     c_output = c_output.zero_() #start with empty ouput
@@ -224,6 +227,8 @@ def run_kernels():
                     e,a,b,c,k,l,x,y,z))            
     
     print("c) Verification:", torch.allclose(c_output, ref, atol=1e-2, rtol=1e-2))
+    ms_c = triton.testing.do_bench(lambda: ct.launch(torch.cuda.current_stream(), grid_c, c_contraction, (a_input, b_input, c_output, e,a,b,c,k,l,x,y,z)))
+    print(f"Runtime: {ms_c:.3f} ms")
 
 
 # Task 1 d)
@@ -238,6 +243,8 @@ def run_kernels():
                     e,a,b,c,k,l,x,y,z))            
     
     print("d) Verification:", torch.allclose(c_output, ref, atol=1e-2, rtol=1e-2))
+    ms_d = triton.testing.do_bench(lambda: ct.launch(torch.cuda.current_stream(), grid_d, d_contraction, (a_input, b_input, c_output, e,a,b,c,k,l,x,y,z)))
+    print(f"Runtime: {ms_d:.3f} ms")
 
 # Task 1 e)
     c_output = c_output.zero_() 
@@ -251,7 +258,55 @@ def run_kernels():
                     e,a,b,c,k,l,x,y,z))            
     
     print("e) Verification:", torch.allclose(c_output, ref, atol=1e-2, rtol=1e-2))
+    ms_e = triton.testing.do_bench(lambda: ct.launch(torch.cuda.current_stream(), grid_e, e_contraction, (a_input, b_input, c_output, e,a,b,c,k,l,x,y,z)))
+    print(f"Runtime: {ms_e:.3f} ms")
 
+
+def compare_bc_bd():
+    def bench(e,a,b,c,k,l,x,y,z):
+        a_input = torch.rand((e,a,b,k,l,x,y), dtype=torch.float16, device='cuda')
+        b_input = torch.rand((e,c,k,l,y,z), dtype=torch.float16, device='cuda')
+        c_output = torch.zeros((e,a,b,c,x,z), dtype=torch.float16, device='cuda')
+
+        # Assert that all tensors will fit in memory (less than 32 GiB) first
+        total_bytes = a_input.nbytes + b_input.nbytes + c_output.nbytes
+        assert total_bytes < 32 * 1024**3, f"Too large: {total_bytes / 1024**3:.2f} GiB"
+        
+        grid_b = (e*a*b*c,)
+        grid_c = (e*a*c,)
+        grid_d = (e*a*b*c,)
+        args = (a_input, b_input, c_output, e,a,b,c,k,l,x,y,z)
+        ms_b = triton.testing.do_bench(lambda: ct.launch(torch.cuda.current_stream(), grid_b, b_contraction, args))
+        ms_c = triton.testing.do_bench(lambda: ct.launch(torch.cuda.current_stream(), grid_c, c_contraction, args))
+        ms_d = triton.testing.do_bench(lambda: ct.launch(torch.cuda.current_stream(), grid_d, d_contraction, args))
+        return ms_b, ms_c, ms_d
+
+    # test1: b) better than c) 
+    print("\nB VS C:")
+    e,a,b,c,k,l,x,y,z = 2, 4, 64, 4, 8, 4, 32, 32, 16
+    ms_b, ms_c, _ = bench(e,a,b,c,k,l,x,y,z)
+    print("large b:")
+    print(f"  b) {ms_b:.3f} ms c) {ms_c:.3f} ms  -> b) {'faster' if ms_b < ms_c else 'slower'}")
+    
+    # test2: c) better than b) 
+    e,a,b,c,k,l,x,y,z = 32, 32, 2, 32, 2, 4, 8, 8, 8
+    ms_b, ms_c, _ = bench(e,a,b,c,k,l,x,y,z)
+    print("large e,a,b:")
+    print(f"  b) {ms_b:.3f} ms c) {ms_c:.3f} ms  -> c) {'faster' if ms_c < ms_b else 'slower'}")
+
+    # test3: b) better than d)
+    print("\nB VS D:")
+    e,a,b,c,k,l,x,y,z = 4, 8, 8, 8, 16, 1, 16,16,16
+    print("small GEMM dimensions:")
+    ms_b, _, ms_d = bench(e,a,b,c,k,l,x,y,z)
+    print(f"  b) {ms_b:.3f} ms d) {ms_d:.3f} ms  -> b) {'faster' if ms_b < ms_d else 'slower'}")
+
+    # test4: d) better than b) 
+    e,a,b,c,k,l,x,y,z = 2, 4, 8, 4, 4, 32, 32, 32, 16
+    print("large l:")
+    ms_b, _, ms_d = bench(e,a,b,c,k,l,x,y,z)
+    print(f"  b) {ms_b:.3f} ms d) {ms_d:.3f} ms  -> d) {'faster' if ms_d < ms_b else 'slower'}")
 
 if __name__ == "__main__":
     run_kernels()
+    compare_bc_bd()
